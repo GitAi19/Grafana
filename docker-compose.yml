@@ -1,0 +1,199 @@
+services:
+  fastapi_app:
+    build:
+      context: ./fastapi_app
+    ports:
+      - "8000:8000"
+      - "9100:9100"
+    environment:
+      - OTEL_SERVICE_NAME=fastapi-service
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./fastapi_app:/app
+    networks:
+      - observability-net
+    logging:
+      driver: "json-file"
+      options:
+        tag: "{{.Name}}"
+    depends_on:
+      - tempo
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+      - '--enable-feature=exemplar-storage'
+    networks:
+      - observability-net
+    depends_on:
+      - fastapi_app
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - observability-net
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./promtail-config.yml:/etc/promtail/promtail-config.yml
+    command: -config.file=/etc/promtail/promtail-config.yml
+    networks:
+      - observability-net
+    depends_on:
+      - loki
+      - fastapi_app
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: tempo
+    command: -config.file=/etc/tempo.yml
+    ports:
+      - "4317:4317"
+      - "14268:14268"
+      - "3200:3200"
+    volumes:
+      - ./tempo.yml:/etc/tempo.yml
+      - tempo-data:/tmp/tempo
+    networks:
+      - observability-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - observability-net
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+volumes:
+  grafana-data:
+  prometheus-data:
+  loki-data:
+  tempo-data:
+
+networks:
+  observability-net:
+    driver: bridge
+
+
+
+
+
+
+
+
+
+
+
+
+#services:
+#  fastapi_app:
+#    build:
+#      context: ./fastapi_app
+#    ports:
+#      - "8000:8000"
+#    environment:
+#      - OTEL_SERVICE_NAME=fastapi-service
+#    command: uvicorn main:app --host 0.0.0.0 --port 8000
+#    volumes:
+#      - ./fastapi_app:/app
+#    networks:
+#      - observability-net
+#    depends_on:
+#      - tempo
+#
+#  prometheus:
+#    image: prom/prometheus:latest
+#    container_name: prometheus
+#    volumes:
+#      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+#    ports:
+#      - "9090:9090"
+#    command:
+#      - '--config.file=/etc/prometheus/prometheus.yml'
+#      - '--web.enable-remote-write-receiver'
+#      - '--enable-feature=exemplar-storage'
+#    networks:
+#      - observability-net
+#    depends_on:
+#      - fastapi_app
+#
+#  loki:
+#    image: grafana/loki:latest
+#    container_name: loki
+#    ports:
+#      - "3100:3100"
+#    command: -config.file=/etc/loki/local-config.yaml
+#    networks:
+#      - observability-net
+#
+#  promtail:
+#    image: grafana/promtail:latest
+#    container_name: promtail
+#    volumes:
+#      - /var/lib/docker/containers:/var/lib/docker/containers:ro    #ADDED THIS REMOVE IF NOT NEEDED
+#      - /var/run/docker.sock:/var/run/docker.sock:ro
+#      - ./promtail-config.yml:/etc/promtail/promtail-config.yml
+#    command: -config.file=/etc/promtail/promtail-config.yml
+#    networks:
+#      - observability-net
+#    depends_on:
+#      - loki
+#
+#  tempo:
+#    image: grafana/tempo:latest
+#    container_name: tempo
+#    command: -config.file=/etc/tempo.yml
+#    user: root 
+#    ports:
+#      - "4317:4317"   # OTLP gRPC ingest
+#      - "4318:4318"   # OTLP HTTP ingest
+#      - "3200:3200"   # Tempo HTTP (querier)
+#    volumes:
+#      - ./tempo.yml:/etc/tempo.yml
+#      - tempo-data:/tmp/tempo
+#    networks:
+#      - observability-net
+#
+#  grafana:
+#    image: grafana/grafana:latest
+#    container_name: grafana
+#    ports:
+#      - "3000:3000"
+#    volumes:
+#      - ./grafana/provisioning:/etc/grafana/provisioning
+#    networks:
+#      - observability-net
+#    depends_on:
+#      - prometheus
+#      - loki
+#      - tempo
+#
+#volumes:
+#  tempo-data:
+#
+#networks:
+#  observability-net:
+#    driver: bridge
